@@ -1,0 +1,1 @@
+CREATE INDEX "users_refresh_token_idx" ON "users" USING btree ("refresh_token");
