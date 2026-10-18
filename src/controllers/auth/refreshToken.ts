@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import COOKIE_OPTIONS, {
   CLEAR_COOKIE_OPTIONS,
 } from "../../configs/cookieOptions.ts";
+import { securityLog } from "../../lib/logger.ts";
 import { rotateSession } from "../../lib/sessions.ts";
 import { isWellFormedToken, signAccessToken } from "../../lib/tokens.ts";
 
@@ -23,8 +24,10 @@ const handleRefreshToken = async (req: Request, res: Response) => {
   if (!result.ok) {
     if (result.reason === "reuse") {
       // Hook this into real alerting later
-      console.warn(
-        `[security] refresh token reuse, family revoked, user=${result.userId}`,
+      securityLog(
+        "refresh_token_reuse",
+        { userId: result.userId, ip: req.ip },
+        "warn",
       );
     }
     res.clearCookie("jwt", CLEAR_COOKIE_OPTIONS);

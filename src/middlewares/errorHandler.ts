@@ -1,14 +1,11 @@
 import type { ErrorRequestHandler } from "express";
-import { clean, logEvents } from "./logEvents.ts";
+import { logger, serializeError } from "../lib/logger.ts";
 
 const isHttpError = (value: unknown): value is number =>
   typeof value === "number" &&
   Number.isInteger(value) &&
   value >= 400 &&
   value < 600;
-
-const firstLine = (value: unknown): string =>
-  typeof value === "string" ? (value.split("\n")[0] ?? "") : "";
 
 const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   // Headers already sent: let Express close the connection
@@ -28,23 +25,25 @@ const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   else if (status < 500 && typeof err?.message === "string")
     message = err.message;
 
-  // Log file: names and the first line only. For Drizzle errors that line is
-  // the SQL with $1, $2 placeholders; the values are on the next line.
-  logEvents(
-    [
-      req.method,
-      clean(req.path),
-      status,
-      clean(err?.name),
-      clean(firstLine(err?.message)),
-    ].join("\t"),
-    "errLog.txt",
-  );
+  const reqId: string | undefined = res.locals.reqId;
 
-  // Full detail (stack, cause, params) goes to the console only
-  console.error(err);
+  // 4xx are already covered by the request log line. Only 5xx get error detail,
+  // and serializeError strips query parameters, values and secrets.
+  if (status >= 500) {
+    logger.error(
+      {
+        reqId,
+        method: req.method,
+        path: (req.originalUrl.split("?")[0] ?? "").slice(0, 200),
+        status,
+        err: serializeError(err),
+      },
+      "request failed",
+    );
+  }
 
-  res.status(status).json({ success: false, message });
+  // requestId lets a user quote it in a bug report so you can find the log line
+  res.status(status).json({ success: false, message, requestId: reqId });
 };
 
 export default errorHandler;

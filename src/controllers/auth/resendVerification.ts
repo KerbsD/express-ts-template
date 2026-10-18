@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 
 import { db } from "../../db/index.ts";
 import { users } from "../../db/schema.ts";
-import { sendVerificationEmail } from "../../services/email.ts";
+import { queueEmail, sendVerificationEmail } from "../../services/email.ts";
 import {
   EMAIL_COOLDOWN_MS,
   VERIFY_TTL_MS,
@@ -42,14 +42,10 @@ const resendVerification = async (req: Request, res: Response) => {
     )
     .returning({ email: users.email });
 
-  if (claimed) {
-    void sendVerificationEmail(claimed.email, token).catch((err) =>
-      console.error(
-        "Verification email failed:",
-        err instanceof Error ? err.message : err,
-      ),
+  if (claimed)
+    queueEmail("verification", () =>
+      sendVerificationEmail(claimed.email, token),
     );
-  }
 
   // Same response whether the email is unknown, already verified, cooling down, or sent
   res.status(200).json({

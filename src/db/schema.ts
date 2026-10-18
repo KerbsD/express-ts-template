@@ -16,8 +16,13 @@ export const users = pgTable(
   {
     id: serial("id").primaryKey(),
     username: text("username").notNull(),
-    email: text("email").notNull().unique(),
+    // Uniqueness is enforced by the case-insensitive index below. A plain
+    // .unique() here would be a redundant, looser second constraint.
+    email: text("email").notNull(),
     password: text("password").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
 
     isVerified: boolean("is_verified").notNull().default(false),
 

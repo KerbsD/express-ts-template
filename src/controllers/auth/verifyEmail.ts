@@ -3,10 +3,13 @@ import type { Request, Response } from "express";
 
 import { db } from "../../db/index.ts";
 import { users } from "../../db/schema.ts";
+import { securityLog } from "../../lib/logger.ts";
 import { isWellFormedToken, sha256 } from "../../lib/tokens.ts";
 
+// POST, with the token in the body: link scanners and prefetchers only issue
+// GETs, so they can no longer consume the token before the user clicks.
 const verifyEmail = async (req: Request, res: Response) => {
-  const { token } = req.query;
+  const { token } = req.body as { token: string };
 
   if (!isWellFormedToken(token))
     return res.status(400).json({
@@ -33,11 +36,13 @@ const verifyEmail = async (req: Request, res: Response) => {
     )
     .returning({ id: users.id });
 
-  if (verified)
+  if (verified) {
+    securityLog("email_verified", { userId: verified.id, ip: req.ip });
     return res.status(200).json({
       success: true,
       message: "Email verified successfully! You can now log in.",
     });
+  }
 
   // Distinguish "expired" from "used/unknown". Only someone holding a real
   // token can learn this, so it doesn't leak which emails exist.

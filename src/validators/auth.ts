@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { validateBody, validateQuery } from "../lib/validate.ts";
+import { validateBody } from "../lib/validate.ts";
 
 // ---------- Field rules ----------
 
@@ -10,19 +10,18 @@ const emailField = z
   .max(254, "Email is too long.")
   .pipe(z.email("Must be a valid email address."));
 
-// bcrypt silently truncates at 72 bytes, so reject anything longer
+// Length beats composition rules ("must contain a symbol"). Breached passwords
+// are rejected separately by lib/pwned.ts. bcrypt silently truncates at 72
+// bytes, so anything longer is rejected rather than quietly weakened.
 const passwordField = (label: string) =>
   z
     .string({ error: `${label} is required.` })
-    .min(8, "Password must be at least 8 characters.")
+    .min(12, "Password must be at least 12 characters.")
     .max(128, "Password must be at most 128 characters.")
     .refine(
       (p) => Buffer.byteLength(p, "utf8") <= 72,
       "Password must be at most 72 bytes.",
-    )
-    .regex(/[A-Z]/, "Password must contain at least one uppercase letter.")
-    .regex(/[0-9]/, "Password must contain at least one number.")
-    .regex(/[!@#$%^&*]/, "Password must contain at least one special character.");
+    );
 
 // ---------- Schemas ----------
 
@@ -51,22 +50,22 @@ export const loginSchema = z.object({
     .max(128, "Password is too long."),
 });
 
-// Used by /forget-password and /resend-verification
+// Used by /auth/password/forgot and /auth/resend-verification
 export const emailSchema = z.object({ email: emailField });
 
+const tokenField = (label: string) =>
+  z
+    .string({ error: `${label} is required.` })
+    .min(1, `${label} is required.`)
+    .max(2048, `Invalid ${label.toLowerCase()}.`);
+
 export const resetPasswordSchema = z.object({
-  token: z
-    .string({ error: "Reset token is required." })
-    .min(1, "Reset token is required.")
-    .max(2048, "Invalid reset token."),
+  token: tokenField("Reset token"),
   newPwd: passwordField("New password"),
 });
 
-export const verifyEmailQuerySchema = z.object({
-  token: z
-    .string({ error: "Verification token is required." })
-    .min(1, "Verification token is required.")
-    .max(2048, "Invalid verification token."),
+export const verifyEmailSchema = z.object({
+  token: tokenField("Verification token"),
 });
 
 // ---------- Ready-to-use middlewares ----------
@@ -75,4 +74,4 @@ export const validateNewUser = validateBody(registerSchema);
 export const validateLogin = validateBody(loginSchema);
 export const validateEmail = validateBody(emailSchema);
 export const validateResetPassword = validateBody(resetPasswordSchema);
-export const validateVerifyEmailQuery = validateQuery(verifyEmailQuerySchema);
+export const validateVerifyEmail = validateBody(verifyEmailSchema);

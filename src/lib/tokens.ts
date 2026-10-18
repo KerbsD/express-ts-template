@@ -17,6 +17,8 @@ const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 export const isWellFormedToken = (value: unknown): value is string =>
   typeof value === "string" && TOKEN_SHAPE.test(value);
 
+export const BCRYPT_ROUNDS = 12;
+
 // ---------- Lifetimes (tune these) ----------
 
 const MINUTE = 60 * 1000;

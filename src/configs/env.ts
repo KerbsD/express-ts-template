@@ -38,7 +38,24 @@ const envSchema = z
       error: 'is required: set it to "development", "production" or "test"',
     }),
 
+    APP_NAME: z
+      .string()
+      .min(1)
+      .max(50)
+      .regex(
+        /^[A-Za-z0-9 .'-]+$/,
+        "may only contain letters, numbers, spaces, . ' -",
+      )
+      .default("MyApp"),
+    LOG_LEVEL: z
+      .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+      .default("info"),
+
     PORT: z.coerce.number().int().positive().default(3000),
+    // How many reverse proxies sit in front of the app (0 = none).
+    // Wrong values let clients spoof X-Forwarded-For and dodge IP rate limits.
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+
     DATABASE_URL: z
       .string()
       .min(1)
@@ -46,6 +63,18 @@ const envSchema = z
         (v) => /^postgres(ql)?:\/\//.test(v),
         "must start with postgres:// or postgresql://",
       ),
+    // Defaults to "verify" in production and "off" otherwise.
+    // Note: an sslmode in DATABASE_URL itself overrides this setting.
+    DB_SSL: z.enum(["off", "no-verify", "verify"]).optional(),
+
+    // Shared rate-limit store. Without it, limits are per-process and reset on deploy.
+    REDIS_URL: z
+      .string()
+      .refine(
+        (v) => /^rediss?:\/\//.test(v),
+        "must start with redis:// or rediss://",
+      )
+      .optional(),
 
     ACCESS_TOKEN_SECRET: z
       .string()
@@ -54,8 +83,15 @@ const envSchema = z
         "must be at least 32 characters (generate one: openssl rand -base64 48)",
       ),
 
+    EMAIL_HOST: z.string().min(1).default("smtp.gmail.com"),
+    EMAIL_PORT: z.coerce.number().int().positive().default(465),
+    EMAIL_SECURE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
     EMAIL_USER: z.string().min(1),
     EMAIL_PASS: z.string().min(1),
+    EMAIL_FROM: z.string().min(1).optional(), // default: "APP_NAME" <EMAIL_USER>
     CLIENT_URL: z.url(),
 
     // Comma-separated list, e.g. "https://app.example.com,https://admin.example.com"
@@ -63,6 +99,9 @@ const envSchema = z
 
     // "lax" is right when the frontend and API are same-site (e.g. app.x.com + api.x.com).
     COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).default("lax"),
+
+    // Rejects passwords found in known breaches (HaveIBeenPwned, k-anonymity)
+    PWNED_PASSWORD_CHECK: z.enum(["on", "off"]).default("on"),
   })
   .refine(
     (cfg) =>

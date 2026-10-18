@@ -1,36 +1,22 @@
 import express from "express";
-import {
-  handleLogin,
-  forgotPassword,
-  resetPassword,
-} from "../../controllers/auth/login.ts";
-
+import { handleLogin } from "../../controllers/auth/login.ts";
 import {
   loginIpLimiter,
   loginLimiter,
-  forgotPasswordLimiter,
-  resetPasswordLimiter,
+  loginUserLimiter,
 } from "../../lib/authLimiter.ts";
-import {
-  validateEmail,
-  validateLogin,
-  validateResetPassword,
-} from "../../validators/auth.ts";
+import { validateLogin } from "../../validators/auth.ts";
 
 const router = express.Router();
 
-router.post("/", loginIpLimiter, loginLimiter, validateLogin, handleLogin);
+// Limiters run BEFORE validation so junk requests are throttled too
 router.post(
-  "/forget-password",
-  forgotPasswordLimiter,
-  validateEmail,
-  forgotPassword,
-);
-router.patch(
-  "/reset-password",
-  resetPasswordLimiter,
-  validateResetPassword,
-  resetPassword,
+  "/",
+  loginIpLimiter,
+  loginLimiter,
+  loginUserLimiter,
+  validateLogin,
+  handleLogin,
 );
 
 export default router;
