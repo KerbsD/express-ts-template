@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { sessions, users } from "../db/schema.ts";
+import { securityLog } from "./logger.ts";
+import { countEvent } from "./metrics.ts";
 import {
   ABSOLUTE_SESSION_TTL_MS,
   REFRESH_GRACE_MS,
@@ -10,11 +12,42 @@ import {
   sha256,
 } from "./tokens.ts";
 
+export type FingerprintInput = {
+  ip?: string | null;
+  userAgent?: string | null;
+};
+
+type SessionFingerprint = { ip: string | null; userAgent: string | null };
+
+const cleanValue = (
+  value: string | null | undefined,
+  maxLength: number,
+): string | null =>
+  typeof value === "string" && value.trim() !== ""
+    ? value.trim().slice(0, maxLength)
+    : null;
+
+const toFingerprint = (input: FingerprintInput): SessionFingerprint => ({
+  ip: cleanValue(input.ip, 64),
+  userAgent: cleanValue(input.userAgent, 512),
+});
+
+/** True when both sides have a value for a field and they differ. */
+const differs = (stored: string | null, current: string | null): boolean =>
+  stored !== null && current !== null && stored !== current;
+
+const fingerprintDiffers = (
+  stored: SessionFingerprint,
+  current: SessionFingerprint,
+): boolean =>
+  differs(stored.ip, current.ip) || differs(stored.userAgent, current.userAgent);
+
 const buildSession = (
   userId: number,
   familyId: string,
   absoluteExpiresAt: Date,
   now: Date,
+  fingerprint: SessionFingerprint,
 ) => {
   const token = newToken();
   // A token never outlives the session's absolute deadline
@@ -30,18 +63,23 @@ const buildSession = (
       tokenHash: sha256(token),
       expiresAt,
       absoluteExpiresAt,
+      ...fingerprint,
     },
   };
 };
 
 /** Start a brand-new session family (called on login). */
-export const createSession = async (userId: number) => {
+export const createSession = async (
+  userId: number,
+  input: FingerprintInput = {},
+) => {
   const now = new Date();
   const s = buildSession(
     userId,
     randomUUID(),
     new Date(now.getTime() + ABSOLUTE_SESSION_TTL_MS),
     now,
+    toFingerprint(input),
   );
   await db.insert(sessions).values(s.row);
   return { token: s.token, maxAge: s.maxAge };
@@ -56,7 +94,7 @@ export type RotateResult =
       username: string;
     }
   | { ok: false; reason: "invalid" }
-  | { ok: false; reason: "reuse"; userId: number };
+  | { ok: false; reason: "reuse"; userId: number; cause: "window" | "grace" };
 
 /**
  * Exchange a refresh token for the next one, atomically.
@@ -65,9 +103,13 @@ export type RotateResult =
  * the same token are serialised: the first rotates, the second then sees
  * `usedAt` and is handled by the grace window or the reuse rule below.
  */
-export const rotateSession = async (rawToken: string): Promise<RotateResult> =>
+export const rotateSession = async (
+  rawToken: string,
+  input: FingerprintInput = {},
+): Promise<RotateResult> =>
   db.transaction(async (tx): Promise<RotateResult> => {
     const now = new Date();
+    const current = toFingerprint(input);
 
     const [session] = await tx
       .select()
@@ -85,6 +127,13 @@ export const rotateSession = async (rawToken: string): Promise<RotateResult> =>
       return { ok: false, reason: "invalid" };
     }
 
+    const revokeFamily = async (familyId: string): Promise<void> => {
+      await tx
+        .update(sessions)
+        .set({ revokedAt: now })
+        .where(and(eq(sessions.familyId, familyId), isNull(sessions.revokedAt)));
+    };
+
     // Already rotated, and outside the grace window: someone is replaying an old
     // token (theft). Revoke the whole family so the attacker AND the victim's
     // copy both die; the real user simply logs in again.
@@ -92,16 +141,32 @@ export const rotateSession = async (rawToken: string): Promise<RotateResult> =>
       session.usedAt &&
       now.getTime() - session.usedAt.getTime() > REFRESH_GRACE_MS
     ) {
-      await tx
-        .update(sessions)
-        .set({ revokedAt: now })
-        .where(
-          and(
-            eq(sessions.familyId, session.familyId),
-            isNull(sessions.revokedAt),
-          ),
-        );
-      return { ok: false, reason: "reuse", userId: session.userId };
+      await revokeFamily(session.familyId);
+      countEvent("refresh_token_reuse");
+      return {
+        ok: false,
+        reason: "reuse",
+        userId: session.userId,
+        cause: "window",
+      };
+    }
+
+    // Normal rotations from a new device/network (VPN, mobile) are common, so
+    // a fingerprint mismatch alone only warns below. But a replay INSIDE the
+    // grace window from a different fingerprint is not a multi-tab race —
+    // concurrent tabs share ip + user-agent — so it is treated as theft.
+    const stored = { ip: session.ip, userAgent: session.userAgent };
+    const mismatched = fingerprintDiffers(stored, current);
+
+    if (session.usedAt && mismatched) {
+      await revokeFamily(session.familyId);
+      countEvent("refresh_token_reuse");
+      return {
+        ok: false,
+        reason: "reuse",
+        userId: session.userId,
+        cause: "grace",
+      };
     }
 
     const [user] = await tx
@@ -112,8 +177,9 @@ export const rotateSession = async (rawToken: string): Promise<RotateResult> =>
 
     if (!user) return { ok: false, reason: "invalid" };
 
-    // Inside the grace window (two tabs racing) we skip this and just issue
-    // another token in the same family instead of treating it as theft.
+    // Inside the grace window (two tabs racing, same fingerprint) we skip this
+    // and just issue another token in the same family instead of treating it
+    // as theft.
     if (!session.usedAt) {
       await tx
         .update(sessions)
@@ -121,11 +187,26 @@ export const rotateSession = async (rawToken: string): Promise<RotateResult> =>
         .where(eq(sessions.id, session.id));
     }
 
+    if (mismatched) {
+      securityLog(
+        "refresh_fingerprint_mismatch",
+        {
+          userId: session.userId,
+          ip: current.ip,
+          previousIp: stored.ip,
+          userAgentChanged: differs(stored.userAgent, current.userAgent),
+        },
+        "warn",
+      );
+      countEvent("refresh_fingerprint_mismatch");
+    }
+
     const next = buildSession(
       session.userId,
       session.familyId,
       session.absoluteExpiresAt,
       now,
+      current,
     );
     await tx.insert(sessions).values(next.row);
 

@@ -3,7 +3,7 @@ import { handleLogin } from "../../controllers/auth/login.ts";
 import {
   loginIpLimiter,
   loginLimiter,
-  loginUserLimiter,
+  loginUserBackoff,
 } from "../../lib/authLimiter.ts";
 import { validateLogin } from "../../validators/auth.ts";
 
@@ -14,7 +14,7 @@ router.post(
   "/",
   loginIpLimiter,
   loginLimiter,
-  loginUserLimiter,
+  loginUserBackoff,
   validateLogin,
   handleLogin,
 );

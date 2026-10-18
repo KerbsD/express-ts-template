@@ -2,7 +2,7 @@
 
 > **Audit date:** 2026-10-17
 > **Auditor:** lead backend review (DeepSeek agent session)
-> **Status:** H1 fixed (2026-10-17), M1 fixed (2026-10-18). H2 accepted as intended behavior. M2–M5, L1–L10 open.
+> **Status:** H1 fixed (2026-10-17), M1 + M2 + M5 fixed (2026-10-18). H2 accepted as intended behavior. M3/M4 deferred by decision. L1–L10 open.
 > **Engine:** Express 5 + TypeScript (native type-stripping, Node ≥ 22.18/23.6), Drizzle ORM + Postgres (Neon), Redis-optional rate limiting, JWT access tokens + opaque rotating refresh tokens.
 
 ---
@@ -33,10 +33,10 @@
 | H1 | **HIGH** | Live credentials in plaintext `.env` + DB over-privilege | [x] *(manual rotations pending — see H1)* |
 | H2 | **HIGH** | Brute-force protection silently disappears (fail-open + per-process fallback) | [~] *accepted — intended behavior (2026-10-18)* |
 | M1 | MEDIUM | Email-bombing gap on `/auth/register` (no per-recipient cap) | [x] |
-| M2 | MEDIUM | Account lockout DoS + username enumeration + renewable username squatting | [ ] |
+| M2 | MEDIUM | Account lockout DoS + username enumeration + renewable username squatting | [x] |
 | M3 | MEDIUM | `TRUST_PROXY_HOPS` is a foot-gun coupled to deployment topology | [ ] |
 | M4 | MEDIUM | No engineering safety net for security-critical code | [ ] |
-| M5 | MEDIUM | Refresh grace window lets a replayed (stolen) token win | [ ] |
+| M5 | MEDIUM | Refresh grace window lets a replayed (stolen) token win | [x] |
 | L1 | LOW | HIBP check fails open | [ ] |
 | L2 | LOW | `CLIENT_URL` has no scheme restriction | [ ] |
 | L3 | LOW | Login isn't origin-checked; refresh cookie path `/auth` is broad | [ ] |
@@ -104,7 +104,15 @@
 **Fix direction:** add an `emailKey`-based per-recipient daily limiter on `/auth/register` after validation, using the same `silentOk` handler pattern as the other two. Consider updating `lastVerificationSentAt`-style state for the "exists" branch too.
 
 ### M2. Account lockout DoS + username enumeration + renewable username squatting
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
+
+**Resolution (2026-10-18):**
+- [x] Replaced `loginUserLimiter` (hard 20/15min lock across IPs — a DoS gift) with `loginUserBackoff` (`src/lib/authLimiter.ts`): failures build a progressive delay (250ms → 500ms → 1s → 2s → 5s cap, 15-min sliding window, reset on successful login). The correct password is never blocked, only delayed; Redis-backed when configured, per-process otherwise.
+- [x] Username conflict now uses generic text ("Username unavailable.", `src/controllers/auth/register.ts`); the 409 status itself still signals existence, but probing is rate-limited (accepted trade-off).
+- [x] Added `registerUsernameLimiter` (5 / 24h per username across IPs, mounted after `validateNewUser`) to bound probing/churn against one username.
+- [x] Squatting deadline is no longer renewable: `purgeStaleUnverifiedUsers` (`src/lib/maintenance.ts`) purges on `createdAt` (fixed 7-day window from creation) instead of `coalesce(lastVerificationSentAt, createdAt)`.
+- [x] Verified: stub-app test (delays 264/504/1010ms as expected, correct password passed at 2006ms after 8 failures, counter reset to ~0ms on success; username cap 5×201 then 429, case/whitespace variants share one bucket) + live DB test (old → purged, old-but-refreshed → purged, fresh → kept) + `tsc --noEmit` clean.
+- Residual: a determined squatter can still re-register every 7 days (fully closing that needs verification-first or CAPTCHA); distributed brute force is slowed, not hard-capped, by design.
 
 **Evidence:**
 - `src/lib/authLimiter.ts:88-93` — 20 failures / 15 min **per username across all IPs** → attacker can lock a victim out (comment acknowledges trade-off).
@@ -145,7 +153,15 @@
 - Add lint to CI; declare `engines.node` and an `.nvmrc`; add `start` script for production; run `drizzle-kit migrate` (against a test DB) in CI.
 
 ### M5. Refresh grace window lets a replayed (stolen) token win
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
+
+**Resolution (2026-10-18):**
+- [x] Session rows now store a client fingerprint (`ip`, `user_agent`) at login and on every rotation — migration `0004_perfect_nico_minoru.sql` applied (`src/db/schema.ts`, `src/lib/sessions.ts`).
+- [x] The grace window now only forgives a **same-fingerprint** replay (a genuine multi-tab race). A replay inside the window from a different IP/user-agent is treated as token theft: the family is revoked immediately (`cause: "grace"`), so a stolen token no longer wins a replacement. **Note:** this goes one step beyond the audit's telemetry-only direction.
+- [x] Normal rotations from a new IP/UA (VPN, mobile, new device) still succeed, but emit a `refresh_fingerprint_mismatch` warning with both fingerprints.
+- [x] Telemetry: dependency-free in-process counters `refresh_token_reuse` (incremented at both detection sites) and `refresh_fingerprint_mismatch` (`src/lib/metrics.ts`); the reuse security log now includes `cause`. The hourly maintenance job snapshots counters to the log until a real metrics backend consumes `snapshotCounters()`.
+- [x] Verified live against Neon: create/rotation store fingerprints; same-client grace race still works; cross-client grace replay → revoked family (`cause: "grace"`); post-window replay → revoked (`cause: "window"`); cross-fingerprint normal rotation allowed + flagged; counters `{refresh_token_reuse: 2, refresh_fingerprint_mismatch: 1}`; `tsc --noEmit` clean.
+- Residual: fingerprints are heuristic — UA is client-controlled and IP trust depends on correct `TRUST_PROXY_HOPS` (see M3); same-device theft remains indistinguishable from the real client (inherent to bearer tokens).
 
 **Evidence:**
 - `src/lib/tokens.ts:30` — `REFRESH_GRACE_MS = 10s`.
@@ -198,7 +214,7 @@
 ### L7. Redis adds latency before fail-open
 **Status:** [ ]
 
-- `src/lib/rateLimitStore.ts:14` (`commandTimeout: 250`) × up to 3 limiters on login (`loginIpLimiter`, `loginLimiter`, `loginUserLimiter`) ≈ 750ms added per request during a Redis brownout before passing through. Consider a circuit breaker or shared timeout budget.
+- `src/lib/rateLimitStore.ts:14` (`commandTimeout: 250`) × up to 3 Redis calls on login (`loginIpLimiter`, `loginLimiter`, the username-backoff read) ≈ 750ms added per request during a Redis brownout before passing through. Consider a circuit breaker or shared timeout budget.
 
 ### L8. Code nits
 **Status:** [ ]
@@ -245,8 +261,8 @@ These were checked and found sound:
 1. ~~**H1**~~ — code/infra done 2026-10-17; external rotations still pending (see H1 Resolution).
 2. ~~**H2**~~ — accepted as intended behavior 2026-10-18; revisit before multi-instance deploys without Redis.
 3. ~~**M1**~~ — fixed 2026-10-18 (per-recipient limiter on register).
-4. **M4 (first slice)** — test harness (Vitest + supertest) around the auth state machine, then lint + engines + CI migration.
-5. **M2, M3, M5** — throttling model, proxy trust docs/validation, session IP/UA telemetry.
+4. **M4 (first slice)** *(deferred by decision 2026-10-18)* — test harness (Vitest + supertest) around the auth state machine, then lint + engines + CI migration.
+5. ~~**M2**~~ / ~~**M5**~~ — fixed 2026-10-18 (username backoff, generic 409, per-username register cap, non-renewable purge; refresh fingerprinting, grace-window theft revoke, reuse/mismatch counters). **M3** *(deferred by decision 2026-10-18)* — proxy trust docs/validation.
 6. **L1–L10** — hardening sweep; batch small nits into one PR.
 
 After each fix: run `npx tsc --noEmit`, `npm audit --omit=dev`, and the new test suite; update this file's checkboxes.

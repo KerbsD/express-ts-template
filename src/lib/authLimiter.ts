@@ -1,7 +1,8 @@
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { Options } from "express-rate-limit";
-import type { Request, Response } from "express";
-import { createStore } from "./rateLimitStore.ts";
+import type { NextFunction, Request, Response } from "express";
+import { setTimeout as sleep } from "node:timers/promises";
+import { createStore, redis } from "./rateLimitStore.ts";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -84,15 +85,100 @@ export const loginIpLimiter = createLimiter(
   { skipSuccessfulRequests: true },
 );
 
-// Per username across ALL IPs, so a botnet can't hammer one account.
-// Trade-off: someone can also lock a victim out for the window by failing on
-// purpose, so the limit is deliberately higher than the per-IP one.
-export const loginUserLimiter = createLimiter(
-  "loginUser",
-  20,
-  "Too many login attempts for this account. Please try again later.",
-  { skipSuccessfulRequests: true, keyGenerator: usernameKey },
-);
+// Per username across ALL IPs: a botnet must not be able to hammer one account.
+// A hard lock is a denial-of-service gift, though — anyone can lock a known
+// account out by failing on purpose. Instead, failures buy a progressive delay
+// on further attempts: brute force becomes too slow to be useful while the
+// correct password still gets through, just later. Redis-backed when
+// configured, per-process otherwise (like the limiters).
+const BACKOFF_AFTER = 5; // failures before any delay
+const BACKOFF_BASE_MS = 250; // first delay, doubling per failure
+const BACKOFF_MAX_MS = 5000; // cap, so legitimate logins still complete
+const BACKOFF_WINDOW_MS = 15 * MINUTE; // sliding, resets on successful login
+
+type BackoffState = { failures: number; resetAt: number };
+const memoryBackoff = new Map<string, BackoffState>();
+
+const backoffKey = (key: string): string => `backoff:login:${key}`;
+
+const readFailures = async (key: string): Promise<number> => {
+  if (redis) {
+    try {
+      const raw = await redis.get(backoffKey(key));
+      return raw ? Math.max(Number.parseInt(raw, 10) || 0, 0) : 0;
+    } catch {
+      return 0; // fail open, like passOnStoreError on the limiters
+    }
+  }
+
+  const state = memoryBackoff.get(key);
+  if (!state || state.resetAt <= Date.now()) {
+    memoryBackoff.delete(key);
+    return 0;
+  }
+  return state.failures;
+};
+
+const bumpFailures = async (key: string): Promise<void> => {
+  if (redis) {
+    try {
+      await redis
+        .multi()
+        .incr(backoffKey(key))
+        .pexpire(backoffKey(key), BACKOFF_WINDOW_MS)
+        .exec();
+    } catch {
+      // fail open
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const state = memoryBackoff.get(key);
+  if (state && state.resetAt > now) {
+    state.failures += 1;
+    state.resetAt = now + BACKOFF_WINDOW_MS;
+  } else {
+    memoryBackoff.set(key, { failures: 1, resetAt: now + BACKOFF_WINDOW_MS });
+  }
+};
+
+const clearFailures = async (key: string): Promise<void> => {
+  if (redis) {
+    try {
+      await redis.del(backoffKey(key));
+    } catch {
+      // fail open
+    }
+    return;
+  }
+  memoryBackoff.delete(key);
+};
+
+// Only 401 (bad credentials) counts as a failure; 200 clears the counter.
+export const loginUserBackoff = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const key = usernameKey(req);
+  const failures = await readFailures(key);
+
+  res.on("finish", () => {
+    if (res.statusCode === 401) void bumpFailures(key);
+    else if (res.statusCode === 200) void clearFailures(key);
+  });
+
+  if (failures >= BACKOFF_AFTER) {
+    const delay = Math.min(
+      BACKOFF_BASE_MS * 2 ** (failures - BACKOFF_AFTER),
+      BACKOFF_MAX_MS,
+    );
+    await sleep(delay);
+  }
+
+  next();
+};
 
 // ---------- Registration / verification / reset ----------
 
@@ -119,6 +205,15 @@ export const registerEmailLimiter = createLimiter(
       201,
     ),
   },
+);
+
+// Cross-IP cap per username: bounds probing of one name and re-registration
+// churn (e.g. refreshing an unverified squat). Mount AFTER validateNewUser.
+export const registerUsernameLimiter = createLimiter(
+  "registerUser",
+  5,
+  "Too many sign-up attempts for this username. Please try again later.",
+  { windowMs: 24 * HOUR, keyGenerator: usernameKey },
 );
 
 export const forgotPasswordLimiter = createLimiter(

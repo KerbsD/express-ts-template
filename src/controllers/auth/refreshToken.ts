@@ -19,14 +19,16 @@ const handleRefreshToken = async (req: Request, res: Response) => {
     return res.sendStatus(403);
   }
 
-  const result = await rotateSession(refreshToken);
+  const result = await rotateSession(refreshToken, {
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
 
   if (!result.ok) {
     if (result.reason === "reuse") {
-      // Hook this into real alerting later
       securityLog(
         "refresh_token_reuse",
-        { userId: result.userId, ip: req.ip },
+        { userId: result.userId, ip: req.ip, cause: result.cause },
         "warn",
       );
     }

@@ -51,7 +51,10 @@ const handleLogin = async (req: Request, res: Response) => {
     });
 
   // Each login starts its own session family (one per device)
-  const session = await createSession(foundUser.id);
+  const session = await createSession(foundUser.id, {
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
 
   securityLog("login_success", { userId: foundUser.id, ip: req.ip });
 

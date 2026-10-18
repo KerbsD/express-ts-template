@@ -52,7 +52,8 @@ const handleNewUser = async (req: Request, res: Response) => {
   let outcome: Outcome;
   try {
     outcome = await db.transaction(async (tx): Promise<Outcome> => {
-      // Username held by a DIFFERENT account? (409 is an accepted trade-off)
+      // Username held by a DIFFERENT account? The 409 status alone still
+      // reveals existence, but probing is rate-limited (accepted trade-off).
       const [nameClash] = await tx
         .select({ id: users.id })
         .from(users)
@@ -119,7 +120,7 @@ const handleNewUser = async (req: Request, res: Response) => {
   if (outcome === "username_taken")
     return res.status(409).json({
       success: false,
-      message: "Username already exists.",
+      message: "Username unavailable.",
     });
 
   if (outcome === "created" || outcome === "taken_over")

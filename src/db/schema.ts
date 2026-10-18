@@ -70,6 +70,11 @@ export const sessions = pgTable(
     }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }), // set when rotated
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+
+    // Fingerprint of the client this token was issued to. Lets the grace
+    // window tell a multi-tab race apart from a replayed (stolen) token.
+    ip: text("ip"),
+    userAgent: text("user_agent"),
   },
   (table) => [
     index("sessions_user_id_idx").on(table.userId),
