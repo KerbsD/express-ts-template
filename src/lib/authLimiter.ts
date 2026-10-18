@@ -2,7 +2,8 @@ import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import type { Options } from "express-rate-limit";
 import type { NextFunction, Request, Response } from "express";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createStore, redis } from "./rateLimitStore.ts";
+import { getRefreshToken } from "../configs/cookieOptions.ts";
+import { createStore, redis, withRedisBreaker } from "./rateLimitStore.ts";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -103,8 +104,9 @@ const backoffKey = (key: string): string => `backoff:login:${key}`;
 
 const readFailures = async (key: string): Promise<number> => {
   if (redis) {
+    const client = redis; // narrowed alias; safe to capture in the closure
     try {
-      const raw = await redis.get(backoffKey(key));
+      const raw = await withRedisBreaker(() => client.get(backoffKey(key)));
       return raw ? Math.max(Number.parseInt(raw, 10) || 0, 0) : 0;
     } catch {
       return 0; // fail open, like passOnStoreError on the limiters
@@ -121,12 +123,15 @@ const readFailures = async (key: string): Promise<number> => {
 
 const bumpFailures = async (key: string): Promise<void> => {
   if (redis) {
+    const client = redis; // narrowed alias; safe to capture in the closure
     try {
-      await redis
-        .multi()
-        .incr(backoffKey(key))
-        .pexpire(backoffKey(key), BACKOFF_WINDOW_MS)
-        .exec();
+      await withRedisBreaker(() =>
+        client
+          .multi()
+          .incr(backoffKey(key))
+          .pexpire(backoffKey(key), BACKOFF_WINDOW_MS)
+          .exec(),
+      );
     } catch {
       // fail open
     }
@@ -145,8 +150,9 @@ const bumpFailures = async (key: string): Promise<void> => {
 
 const clearFailures = async (key: string): Promise<void> => {
   if (redis) {
+    const client = redis; // narrowed alias; safe to capture in the closure
     try {
-      await redis.del(backoffKey(key));
+      await withRedisBreaker(() => client.del(backoffKey(key)));
     } catch {
       // fail open
     }
@@ -290,8 +296,7 @@ export const refreshFailLimiter = createLimiter(
   "Too many failed refresh attempts. Please try again later.",
   {
     skipSuccessfulRequests: true,
-    skip: (req: Request) =>
-      typeof req.cookies?.jwt !== "string" || !req.cookies.jwt,
+    skip: (req: Request) => !getRefreshToken(req),
   },
 );
 

@@ -10,7 +10,7 @@ const corsOptions: CorsOptions = {
   },
   // Required for the browser to send/accept the refresh cookie cross-origin
   credentials: true,
-  methods: ["GET", "POST", "PATCH", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   maxAge: 600, // let browsers cache preflight results for 10 minutes
   optionsSuccessStatus: 200,

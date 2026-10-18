@@ -20,12 +20,3 @@ export const validateBody =
     req.body = result.data; // cleaned data; unknown fields are stripped
     next();
   };
-
-// In Express 5 req.query is a read-only getter, so we validate but don't replace it
-export const validateQuery =
-  (schema: ZodType) => (req: Request, res: Response, next: NextFunction) => {
-    const result = schema.safeParse(req.query);
-    if (!result.success) return sendValidationError(res, result.error);
-
-    next();
-  };

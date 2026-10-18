@@ -33,6 +33,11 @@ app.disable("x-powered-by");
 
 app.use(requestLogger);
 app.use(helmet());
+
+// This API returns tokens and private data on every route: keep all responses
+// uncacheable (helmet does not set Cache-Control). Mounted before CORS so even
+// preflight responses carry it.
+app.use(noStore);
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
@@ -42,10 +47,26 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Readiness: checks the database is reachable. Cached for a few seconds so
+// frequent probes can't hammer the pool; answers 503 while the DB is down.
+let dbReadiness = { ok: true, checkedAt: 0 };
+const READINESS_CACHE_MS = 5_000;
+
+app.get("/health/ready", async (_req, res) => {
+  if (Date.now() - dbReadiness.checkedAt > READINESS_CACHE_MS) {
+    try {
+      await pool.query("select 1");
+      dbReadiness = { ok: true, checkedAt: Date.now() };
+    } catch {
+      dbReadiness = { ok: false, checkedAt: Date.now() };
+    }
+  }
+  res.status(dbReadiness.ok ? 200 : 503).json({ ok: dbReadiness.ok });
+});
+
 app.use(globalLimiter);
 
 // Authentication (mounted under /auth so the refresh cookie can be scoped to path=/auth)
-app.use("/auth", noStore);
 app.use("/auth/login", loginRoute);
 app.use("/auth/register", registerRoute);
 app.use("/auth/verify-email", verifyEmailRoute);

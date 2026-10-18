@@ -92,7 +92,14 @@ const envSchema = z
     EMAIL_USER: z.string().min(1),
     EMAIL_PASS: z.string().min(1),
     EMAIL_FROM: z.string().min(1).optional(), // default: "APP_NAME" <EMAIL_USER>
-    CLIENT_URL: z.url(),
+    // A plain origin (no path): it's used to build links, so javascript:/data:
+    // URLs or paths would be unsafe or surprising in emails.
+    CLIENT_URL: z
+      .url()
+      .refine(
+        isPlainOrigin,
+        "must look like https://app.example.com (scheme + host [+ port], no path, no trailing slash)",
+      ),
 
     // Comma-separated list, e.g. "https://app.example.com,https://admin.example.com"
     CORS_ORIGINS: originList,
@@ -118,6 +125,13 @@ const envSchema = z
     {
       error: "must be https:// when NODE_ENV=production",
       path: ["CLIENT_URL"],
+    },
+  )
+  .refine(
+    (cfg) => cfg.NODE_ENV !== "production" || cfg.PWNED_PASSWORD_CHECK === "on",
+    {
+      error: "must be 'on' when NODE_ENV=production",
+      path: ["PWNED_PASSWORD_CHECK"],
     },
   );
 

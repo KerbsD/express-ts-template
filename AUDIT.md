@@ -2,7 +2,7 @@
 
 > **Audit date:** 2026-10-17
 > **Auditor:** lead backend review (DeepSeek agent session)
-> **Status:** H1 fixed (2026-10-17), M1 + M2 + M5 fixed (2026-10-18). H2 accepted as intended behavior. M3/M4 deferred by decision. L1–L10 open.
+> **Status:** H1 fixed (2026-10-17). M1 + M2 + M5 fixed (2026-10-18). H2 accepted as intended behavior. M3/M4 deferred by decision. L1–L8 + L10 fixed (2026-10-18); L9 tracked upstream (dev-only).
 > **Engine:** Express 5 + TypeScript (native type-stripping, Node ≥ 22.18/23.6), Drizzle ORM + Postgres (Neon), Redis-optional rate limiting, JWT access tokens + opaque rotating refresh tokens.
 
 ---
@@ -37,16 +37,16 @@
 | M3 | MEDIUM | `TRUST_PROXY_HOPS` is a foot-gun coupled to deployment topology | [ ] |
 | M4 | MEDIUM | No engineering safety net for security-critical code | [ ] |
 | M5 | MEDIUM | Refresh grace window lets a replayed (stolen) token win | [x] |
-| L1 | LOW | HIBP check fails open | [ ] |
-| L2 | LOW | `CLIENT_URL` has no scheme restriction | [ ] |
-| L3 | LOW | Login isn't origin-checked; refresh cookie path `/auth` is broad | [ ] |
-| L4 | LOW | `no-store` scoped to `/auth` only | [ ] |
-| L5 | LOW | `verifyJwt` nits (Bearer case-sensitivity, missing `WWW-Authenticate`) | [ ] |
-| L6 | LOW | CORS `methods` lacks PUT/DELETE | [ ] |
-| L7 | LOW | Redis adds latency before fail-open | [ ] |
-| L8 | LOW | Code nits (unused `validateQuery`, `any`, config message, cookie name) | [ ] |
-| L9 | LOW | 4 moderate dev-only npm advisories (drizzle-kit → esbuild) | [ ] |
-| L10 | LOW | Ops/repo hygiene (uncommitted migration/lockfile, no migration CI, health, in-process jobs) | [ ] |
+| L1 | LOW | HIBP check fails open | [x] |
+| L2 | LOW | `CLIENT_URL` has no scheme restriction | [x] |
+| L3 | LOW | Login isn't origin-checked; refresh cookie path `/auth` is broad | [x] |
+| L4 | LOW | `no-store` scoped to `/auth` only | [x] |
+| L5 | LOW | `verifyJwt` nits (Bearer case-sensitivity, missing `WWW-Authenticate`) | [x] |
+| L6 | LOW | CORS `methods` lacks PUT/DELETE | [x] |
+| L7 | LOW | Redis adds latency before fail-open | [x] |
+| L8 | LOW | Code nits (unused `validateQuery`, `any`, config message, cookie name) | [x] |
+| L9 | LOW | 4 moderate dev-only npm advisories (drizzle-kit → esbuild) | [~] |
+| L10 | LOW | Ops/repo hygiene (uncommitted migration/lockfile, no migration CI, health, in-process jobs) | [~] |
 
 ---
 
@@ -179,62 +179,109 @@
 ## LOW / HARDENING
 
 ### L1. HIBP check fails open
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/lib/pwned.ts:30-36` — outage/timeout → password allowed. Reasonable availability choice; document it and alert on the warn log. Ensure `PWNED_PASSWORD_CHECK` is never `off` in production.
 
+**Resolution (2026-10-18):**
+- [x] Fail-open stays (availability choice) but is now alertable: each occurrence emits a `pwned_check_unavailable` security log + counter (`src/lib/pwned.ts`, `src/lib/metrics.ts`).
+- [x] `PWNED_PASSWORD_CHECK=off` is rejected when `NODE_ENV=production` (`src/configs/env.ts`); development may still disable it.
+- [x] Verified: simulated HIBP outage → password allowed + counter incremented; real HIBP call still detects breached passwords; production env with `off` refuses to boot.
+
 ### L2. `CLIENT_URL` has no scheme restriction
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/configs/env.ts:95` — `z.url()` accepts `javascript:`/`data:` URLs, which flow into email `href`s (`src/services/email.ts:61-62,82,105`).
 - Production is https-guarded (`:115-122`), but staging/dev are not.
 - Fix: apply the same `isPlainOrigin`-style refine used for `CORS_ORIGINS`.
 
+**Resolution (2026-10-18):**
+- [x] `CLIENT_URL` now uses the same `isPlainOrigin` refine as `CORS_ORIGINS`: a plain http(s) origin, no path, no trailing slash. `javascript:`/`data:` and path-bearing URLs refuse to boot (`src/configs/env.ts`; `.env.example` comment added).
+- [x] Verified: `javascript:alert(1)`, trailing-slash and path variants are rejected; the real `.env` and plain origins still parse.
+
 ### L3. Login isn't origin-checked; refresh cookie path is broad
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/routes/auth/login.ts` — no `requireTrustedOrigin`. Currently **not exploitable** (JSON-only body parsing + CORS preflight block cross-site forms), but it's the one cookie-setting endpoint without the defense-in-depth middleware. Consider adding it for consistency once non-browser clients are accounted for.
 - `src/configs/cookieOptions.ts:11` — refresh cookie `path=/auth` is attached to login/register/verify/reset too. Acceptable; narrower scoping (`/auth/refresh` + `/auth/logout`) is tighter if frontend allows.
 
+**Resolution (2026-10-18):**
+- [x] `requireTrustedOrigin` added to `/auth/login` (first in the chain, like refresh/logout). **Behavior change:** login now rejects requests without a whitelisted `Origin`, same as the other cookie endpoints — non-browser clients must send one (documented in `requireTrustOrigin.ts`).
+- [x] Cookie stays scoped to `path=/auth` (accepted): one cookie can't carry two paths and both `/auth/refresh` and `/auth/logout` need it; `/auth` is the narrowest workable scope.
+- [x] Verified live: login without `Origin` → 403; whitelisted `Origin` → normal flow.
+
 ### L4. `no-store` scoped to `/auth` only
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `server.ts:48`. Protected routes added below `verifyJwt` will not get `Cache-Control: no-store`; helmet doesn't add it. Add a global default or document the convention so sensitive GETs stay uncacheable.
 
+**Resolution (2026-10-18):**
+- [x] `noStore` is now a global default (`app.use(noStore)`, mounted before CORS in `server.ts`) instead of being scoped to `/auth`, so every response — preflights, 404s, errors, and future protected routes — carries `Cache-Control: no-store`.
+- [x] Verified live: `/health`, `/health/ready`, unauthenticated 401s and preflight responses all carry the header.
+
 ### L5. `verifyJwt` nits
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/middlewares/verifyJwt.ts:6,12` — `"Bearer "` prefix is case-sensitive (RFC 7235 schemes are case-insensitive); 401 on missing header lacks `WWW-Authenticate: Bearer` (tampered tokens do get it at `:25`).
 
+**Resolution (2026-10-18):**
+- [x] `Bearer` scheme matched case-insensitively; every 401 now carries `WWW-Authenticate` (bare `Bearer` for a missing header, `error="invalid_token"` for malformed/tampered tokens) (`src/middlewares/verifyJwt.ts`).
+- [x] Verified live: lowercase `bearer` accepted, uppercase still works, malformed-token 401 includes the challenge.
+
 ### L6. CORS `methods` lacks PUT/DELETE
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/configs/corsOption.ts:13`. First future `PUT`/`DELETE` route will fail preflight mysteriously. Add `PUT`, `DELETE` (and `PATCH` already present).
 
+**Resolution (2026-10-18):**
+- [x] `methods` now includes `PUT` and `DELETE` (`src/configs/corsOption.ts`).
+- [x] Verified live: preflight advertises both.
+
 ### L7. Redis adds latency before fail-open
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/lib/rateLimitStore.ts:14` (`commandTimeout: 250`) × up to 3 Redis calls on login (`loginIpLimiter`, `loginLimiter`, the username-backoff read) ≈ 750ms added per request during a Redis brownout before passing through. Consider a circuit breaker or shared timeout budget.
 
+**Resolution (2026-10-18):**
+- [x] Added a latency circuit breaker around every Redis command (`withRedisBreaker`, `src/lib/rateLimitStore.ts`): after 3 consecutive failures, commands fail instantly for a 15s cooldown instead of paying up to 250ms per call. Fail-open semantics are unchanged (`passOnStoreError` / try-catch). The username backoff's read/write/clear go through it too (`src/lib/authLimiter.ts`).
+- [x] Verified: against a dead Redis port, calls 1–3 fail normally then open the circuit; the 4th fails in 0ms with `redis circuit is open`.
+
 ### L8. Code nits
-**Status:** [ ]
+**Status:** [x] — fixed 2026-10-18 (see Resolution)
 
 - `src/lib/validate.ts:25-31` — `validateQuery` unused (dead code or wire it where needed).
 - `src/lib/helpers.ts:12-16` — `any` types; prefer `unknown` + narrowing.
 - `drizzle.config.ts:4-5` — error message says `DATABASE_URL_UNPOOLED` but checks `DATABASE_URL`.
 - `src/controllers/auth/login.ts:58` / `src/configs/cookieOptions.ts` — cookie named `jwt` holds an opaque token, not a JWT (naming confusion; renaming needs a migration/coexistence plan).
 
+**Resolution (2026-10-18):**
+- [x] `validateQuery` removed (dead code; re-add when a route actually needs query validation).
+- [x] `helpers.ts` `any` → `unknown` with narrowing helpers (`readStringField` / `causeOf`).
+- [x] `drizzle.config.ts` message/comment mismatch was already resolved in the H1 pass (`MIGRATION_DATABASE_URL ?? DATABASE_URL`).
+- [x] Cookie renamed `jwt` → `refresh` with coexistence (`src/configs/cookieOptions.ts`): reads prefer the new name and still accept the legacy one; the legacy cookie is cleared on login, rotation, rejected refreshes and logout. Delete the legacy handling once old cookies have expired.
+- [x] Verified live: login/refresh/logout round-trip works with the new name; a legacy `jwt` cookie is still accepted and cleared; revoked family gets 403.
+
 ### L9. 4 moderate dev-only npm advisories
-**Status:** [ ]
+**Status:** [~] — accepted 2026-10-18 (no upstream fix; dev-only)
 
 - `npm audit` → `drizzle-kit → @esbuild-kit/esm-loader → esbuild ≤0.24.2` (GHSA-67mh-4wv8-2f99, dev-server request snooping). Prod deps (`npm audit --omit=dev`) are clean. Track a drizzle-kit update; don't `npm audit fix --force` (downgrades drizzle-kit to 0.18).
 
+**Resolution (2026-10-18):**
+- [x] Confirmed `drizzle-kit@0.31.11` **is the latest** and still pins `@esbuild-kit/esm-loader → esbuild@0.18`. The advisory only concerns esbuild's `serve` dev-server feature, which this dependency never starts (it's used as a build-time loader). No override forced — risk is dev-tool-only and `npm audit --omit=dev` stays clean.
+- [ ] Re-check on each `drizzle-kit` upgrade; drop this note once `@esbuild-kit/esm-loader` leaves its dependency tree.
+
 ### L10. Ops / repo hygiene
-**Status:** [ ]
+**Status:** [~] — partially fixed 2026-10-18 (see Resolution)
 
 - Uncommitted in working tree: `drizzle/0003_*.sql`, `drizzle/meta/_journal.json`, `package-lock.json` (+ many modified src files). Deploying "the repo" as-is risks schema drift. Commit deliberately; add migration step to CI/deploy.
 - `/health` (`server.ts:41-43`) is unthrottled and liveness-only; fine for now — add DB readiness (`SELECT 1`) if used by orchestrators.
 - Email sends (`src/services/email.ts:50-57`) and maintenance (`server.ts:79-84`) run in-process per instance — idempotent/acceptable single-instance; move to a queue (BullMQ/pg-boss) before scaling horizontally.
+
+**Resolution (2026-10-18):**
+- [x] `/health/ready` added: DB readiness via cached `SELECT 1` (5s cache, 503 while down); `/health` stays a pure liveness endpoint (`server.ts`).
+- [x] In-process email sends + maintenance documented as acceptable for a single instance (code comments); move to a queue before scaling out.
+- [ ] Working tree still uncommitted — commit deliberately when ready (not done as part of this sweep). Migration-in-CI is tracked under the deferred **M4** pass.
+- [x] Verified live: `/health/ready` answers `{ok:true}` against the real DB.
 
 ---
 
@@ -249,7 +296,7 @@ These were checked and found sound:
 - **Timing defenses:** dummy bcrypt hash for unknown users (`login.ts:13-16,35`), uniform forgot/resend responses (`password.ts:27-31`, `resendVerification.ts:50-55`).
 - **Atomic flows:** verify email consume, resend rotation, forgot-password claim, reset-password transaction all single-statement/`FOR UPDATE` (`verifyEmail.ts:24-37`, `resendVerification.ts:23-43`, `password.ts:38-57,89-128`).
 - **Response hygiene:** 5xx messages genericized, Drizzle params stripped from logs (`errorHandler.ts:20-26`, `logger.ts:36-59`), redaction list (`logger.ts:70-89`), query strings never logged (`requestLogger.ts:6-9,33`).
-- **Transport/parsing:** helmet defaults, `x-powered-by` off, `express.json({ limit: "10kb" })`, CORS allowlist with credentials, `no-store` on `/auth`, origin check on `/auth/refresh` + `/auth/logout` (`server.ts:32-48`, `corsOption.ts`, `requireTrustOrigin.ts`).
+- **Transport/parsing:** helmet defaults, `x-powered-by` off, `express.json({ limit: "10kb" })`, CORS allowlist with credentials (including PUT/DELETE), `no-store` on all responses, origin check on `/auth/login` + `/auth/refresh` + `/auth/logout` (`server.ts`, `corsOption.ts`, `requireTrustOrigin.ts`).
 - **Register takeover semantics:** unverified email rows are overwritten by the true owner (`register.ts:91-98`) — deliberate anti-squat design.
 - **Infra:** pool error handler prevents crash (`db/index.ts:20-22`), statement timeout set, graceful shutdown with hard deadline + unhandled rejection/exception handlers (`server.ts:90-128`), Redis closes before pool.
 - **`tsc --noEmit` clean; prod dependencies free of known advisories.**
@@ -263,6 +310,6 @@ These were checked and found sound:
 3. ~~**M1**~~ — fixed 2026-10-18 (per-recipient limiter on register).
 4. **M4 (first slice)** *(deferred by decision 2026-10-18)* — test harness (Vitest + supertest) around the auth state machine, then lint + engines + CI migration.
 5. ~~**M2**~~ / ~~**M5**~~ — fixed 2026-10-18 (username backoff, generic 409, per-username register cap, non-renewable purge; refresh fingerprinting, grace-window theft revoke, reuse/mismatch counters). **M3** *(deferred by decision 2026-10-18)* — proxy trust docs/validation.
-6. **L1–L10** — hardening sweep; batch small nits into one PR.
+6. ~~**L1–L10**~~ — hardening sweep 2026-10-18: L1–L8 + L10 fixed; L9 has no upstream fix (dev-only, tracked); L10's commit + migration-CI remain (CI under deferred M4).
 
 After each fix: run `npx tsc --noEmit`, `npm audit --omit=dev`, and the new test suite; update this file's checkboxes.

@@ -27,6 +27,40 @@ if (!redis && env.NODE_ENV === "production") {
   );
 }
 
+// Even with commandTimeout: 250, a brownout costs every request up to 250ms
+// per Redis call (a failed login makes three). After a few consecutive
+// failures, stop paying that cost: fail instantly for a cooldown. The errors
+// still land on the same fail-open paths (passOnStoreError / try-catch).
+const BREAKER_THRESHOLD = 3;
+const BREAKER_COOLDOWN_MS = 15_000;
+
+let consecutiveFailures = 0;
+let circuitOpenUntil = 0;
+
+/** Runs one Redis operation through the latency circuit breaker. */
+export const withRedisBreaker = async <T>(
+  exec: () => Promise<T>,
+): Promise<T> => {
+  if (Date.now() < circuitOpenUntil) throw new Error("redis circuit is open");
+
+  try {
+    const result = await exec();
+    consecutiveFailures = 0;
+    return result;
+  } catch (err) {
+    consecutiveFailures += 1;
+    if (consecutiveFailures >= BREAKER_THRESHOLD) {
+      consecutiveFailures = 0;
+      circuitOpenUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      logger.warn(
+        { cooldownMs: BREAKER_COOLDOWN_MS },
+        "redis unhealthy: failing rate-limit Redis calls instantly during cooldown",
+      );
+    }
+    throw err;
+  }
+};
+
 /** Each limiter needs its own store with a unique prefix. */
 export const createStore = (name: string): Store | undefined => {
   if (!redis) return undefined;
@@ -34,7 +68,9 @@ export const createStore = (name: string): Store | undefined => {
   return new RedisStore({
     prefix: `rl:${name}:`,
     sendCommand: (command: string, ...args: string[]) =>
-      redis.call(command, ...args) as Promise<RedisReply>,
+      withRedisBreaker(
+        () => redis.call(command, ...args) as Promise<RedisReply>,
+      ),
   });
 };
 
