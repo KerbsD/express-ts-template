@@ -1,5 +1,6 @@
 import {
   pgTable,
+  pgEnum,
   serial,
   text,
   timestamp,
@@ -82,6 +83,51 @@ export const sessions = pgTable(
   ],
 );
 
+// ---------- Bookings ----------
+
+// Statuses live in a real Postgres enum; add values with a migration if needed.
+export const bookingStatus = pgEnum("booking_status", [
+  "pending",
+  "confirmed",
+  "completed",
+  "cancelled",
+]);
+
+// A booking requested from the public site by a visitor (no account needed).
+// Admins list and manage these through /admin/bookings.
+export const bookings = pgTable(
+  "bookings",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull().default(""),
+    // Up to 3 preferred dates; stored sorted (earliest first), deduplicated.
+    // Exclusivity is enforced by the API (src/lib/bookingSlots.ts) rather than
+    // a constraint, so writes outside the API can still double-book.
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true })
+      .array()
+      .notNull(),
+    message: text("message").notNull().default(""),
+    status: bookingStatus("status").notNull().default("pending"),
+    adminNote: text("admin_note").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("bookings_scheduled_at_idx").on(table.scheduledAt),
+    index("bookings_status_idx").on(table.status),
+    index("bookings_created_at_idx").on(table.createdAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
+export type Booking = typeof bookings.$inferSelect;
+export type NewBooking = typeof bookings.$inferInsert;

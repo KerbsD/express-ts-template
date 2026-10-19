@@ -36,6 +36,20 @@
       "when": 1792293327295,
       "tag": "0004_perfect_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792312349249,
+      "tag": "0005_minor_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792374161437,
+      "tag": "0006_brave_the_hood",
+      "breakpoints": true
     }
   ]
 }

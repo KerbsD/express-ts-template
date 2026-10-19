@@ -24,6 +24,8 @@ import loginRoute from "./src/routes/auth/login.ts";
 import passwordRoute from "./src/routes/auth/password.ts";
 import refreshTokenRoute from "./src/routes/auth/refresh.ts";
 import logoutRoute from "./src/routes/auth/logout.ts";
+import createBookingRoute from "./src/routes/bookings/create.ts";
+import adminBookingsRoute from "./src/routes/bookings/admin.ts";
 
 const app = express();
 
@@ -75,11 +77,17 @@ app.use("/auth/password", passwordRoute);
 app.use("/auth/refresh", refreshTokenRoute);
 app.use("/auth/logout", logoutRoute);
 
+// Public: booking requests from the site (no account needed; the per-IP
+// limiter lives inside the router)
+app.use("/bookings", createBookingRoute);
+
 // Default-deny: everything registered BELOW this line requires a valid access
 // token, so a new route can't be left public by forgetting a middleware.
 app.use(verifyJwt);
 
-// e.g. app.use("/notes", notesRoute);
+// Admin: list and manage bookings (any authenticated user for now; add a role
+// check here when you introduce admin roles)
+app.use("/admin/bookings", adminBookingsRoute);
 
 app.all("*splat", notFound);
 app.use(errorHandler);
