@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   boolean,
+  date,
   uniqueIndex,
   index,
   uuid,
@@ -126,8 +127,50 @@ export const bookings = pgTable(
   ],
 );
 
+// ---------- Portfolio ----------
+
+// Gallery items shown on the public /portfolio page and managed by the admin.
+// Images are hosted elsewhere (Cloudinary, Vercel Blob, the Next.js site); only
+// the URL/path is stored here.
+export const portfolioItems = pgTable(
+  "portfolio_items",
+  {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    // Site-relative path ("/portfolio/TP7.jpg") or an absolute http(s) URL
+    imageUrl: text("image_url").notNull(),
+    // Free text, so new styles don't need a migration. The frontend can build
+    // its filter list from the distinct values.
+    style: text("style").notNull().default(""),
+    artist: text("artist").notNull().default(""),
+    duration: text("duration").notNull().default(""), // display text, e.g. "3.5 hours"
+    // Calendar date only (no time or timezone), stored as YYYY-MM-DD
+    date: date("date"),
+    // Carousel order; lower comes first. New items are appended by the API.
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Draft/hidden items never appear on the public route
+    published: boolean("published").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("portfolio_items_published_sort_idx").on(
+      table.published,
+      table.sortOrder,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
+export type PortfolioItem = typeof portfolioItems.$inferSelect;
+export type NewPortfolioItem = typeof portfolioItems.$inferInsert;
