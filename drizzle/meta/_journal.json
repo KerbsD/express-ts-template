@@ -57,6 +57,13 @@
       "when": 1792399809653,
       "tag": "0007_married_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792415138226,
+      "tag": "0008_sweet_iron_man",
+      "breakpoints": true
     }
   ]
 }

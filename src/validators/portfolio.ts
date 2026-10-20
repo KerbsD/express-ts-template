@@ -1,29 +1,8 @@
 import { z } from "zod";
 import { validateBody, validateQuery } from "../lib/validate.ts";
+import { imageUrlField, optionalText, sortOrderField } from "./shared.ts";
 
 // ---------- Shared fields ----------
-
-// Site-relative path ("/portfolio/TP7.jpg") or an absolute http(s) URL. Rejects
-// javascript:, data: and other schemes, since the frontend renders this in <img>.
-const imageUrlField = z
-  .string({ error: "Image URL is required." })
-  .trim()
-  .min(1, "Image URL is required.")
-  .max(2048, "Image URL is too long.")
-  .refine(
-    (value) =>
-      value.startsWith("/") ||
-      /^https?:\/\/[^\s]+$/i.test(value),
-    "Image URL must be a site-relative path or an http(s) URL.",
-  );
-
-// Optional display fields: "" is a valid value, so treat it as absent
-const optionalText = (max: number, label: string) =>
-  z
-    .string()
-    .trim()
-    .max(max, `${label} is too long.`)
-    .default("");
 
 // Calendar date, no time or timezone: YYYY-MM-DD
 const dateField = z.iso
@@ -31,11 +10,6 @@ const dateField = z.iso
     error: "date must be a calendar date in YYYY-MM-DD format.",
   })
   .nullable();
-
-const sortOrderField = z.coerce
-  .number({ error: "sortOrder must be a number." })
-  .int("sortOrder must be an integer.")
-  .min(0, "sortOrder must be at least 0.");
 
 // ---------- Schemas ----------
 

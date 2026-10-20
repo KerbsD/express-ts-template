@@ -167,6 +167,46 @@ export const portfolioItems = pgTable(
   ],
 );
 
+// ---------- Merch ----------
+
+// Products shown on the public /merch page and managed by the admin. Prices
+// are whole Philippine pesos (the frontend formats them with Intl en-PH).
+// There is no stock/inventory tracking yet: `preorder` only drives the badge.
+export const merchProducts = pgTable(
+  "merch_products",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    // Stable, URL-safe identifier (generated from the name when omitted)
+    slug: text("slug").notNull(),
+    price: integer("price").notNull(),
+    // Site-relative path ("/merch/HOODIE.png") or an absolute http(s) URL
+    imageUrl: text("image_url").notNull(),
+    // Free text, so new categories don't need a migration. The frontend builds
+    // its filter chips from the distinct values.
+    category: text("category").notNull(),
+    preorder: boolean("preorder").notNull().default(false),
+    // Display order; lower comes first. New products are appended by the API.
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Draft/hidden products never appear on the public route
+    published: boolean("published").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("merch_products_slug_unique").on(table.slug),
+    index("merch_products_published_sort_idx").on(
+      table.published,
+      table.sortOrder,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -174,3 +214,5 @@ export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
 export type PortfolioItem = typeof portfolioItems.$inferSelect;
 export type NewPortfolioItem = typeof portfolioItems.$inferInsert;
+export type MerchProduct = typeof merchProducts.$inferSelect;
+export type NewMerchProduct = typeof merchProducts.$inferInsert;
