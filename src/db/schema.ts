@@ -207,6 +207,47 @@ export const merchProducts = pgTable(
   ],
 );
 
+// ---------- Designs ----------
+
+// Original tattoo designs offered on the public /design page and managed by
+// the admin. The site adds designs to the cart without a price (they're
+// price-on-request), so there is no price column.
+export const designItems = pgTable(
+  "design_items",
+  {
+    id: serial("id").primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    // Displayed on the card ("Style: Minimalist")
+    style: text("style").notNull().default(""),
+    // Displayed on the card ("Placement: Forearm / Chest")
+    placement: text("placement").notNull().default(""),
+    // Site-relative path ("/design/dfs-1.png") or an absolute http(s) URL
+    imageUrl: text("image_url").notNull(),
+    // Filter chip ("Minimalist", "Black & Grey", "Illustrative"). Free text,
+    // so new categories don't need a migration: the frontend derives its chips
+    // from the distinct values.
+    category: text("category").notNull(),
+    // Display order; lower comes first. New designs are appended by the API.
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Draft/hidden designs never appear on the public route
+    published: boolean("published").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("design_items_published_sort_idx").on(
+      table.published,
+      table.sortOrder,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -216,3 +257,5 @@ export type PortfolioItem = typeof portfolioItems.$inferSelect;
 export type NewPortfolioItem = typeof portfolioItems.$inferInsert;
 export type MerchProduct = typeof merchProducts.$inferSelect;
 export type NewMerchProduct = typeof merchProducts.$inferInsert;
+export type DesignItem = typeof designItems.$inferSelect;
+export type NewDesignItem = typeof designItems.$inferInsert;

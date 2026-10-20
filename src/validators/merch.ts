@@ -2,6 +2,7 @@ import { z } from "zod";
 import { slugify } from "../lib/slug.ts";
 import { validateBody, validateQuery } from "../lib/validate.ts";
 import {
+  booleanQueryField,
   imageUrlField,
   paginationFields,
   sortOrderField,
@@ -40,12 +41,6 @@ const slugField = z
     "Slug must contain at least one letter or number.",
   );
 
-// Query-string booleans: ?published=true / ?preorder=false
-const booleanQuery = (label: string) =>
-  z
-    .enum(["true", "false"], { error: `${label} must be true or false.` })
-    .transform((value) => value === "true");
-
 // ---------- Schemas ----------
 
 export const createMerchSchema = z.object({
@@ -80,8 +75,8 @@ export const updateMerchSchema = z
 // ?published=true&preorder=false&category=Hoodies&search=hoodie&limit=...&offset=...
 export const listMerchQuerySchema = z.object({
   ...paginationFields,
-  published: booleanQuery("published").optional(),
-  preorder: booleanQuery("preorder").optional(),
+  published: booleanQueryField("published").optional(),
+  preorder: booleanQueryField("preorder").optional(),
   category: z.string().trim().max(60, "Category is too long.").optional(),
   search: z.string().trim().max(120, "Search is too long.").optional(),
   sort: z.enum(["sortOrder", "name", "price", "createdAt"]).default("sortOrder"),

@@ -42,3 +42,9 @@ export const paginationFields = {
     .min(0, "offset must be at least 0.")
     .default(0),
 };
+
+// Query-string booleans: ?published=true / ?preorder=false
+export const booleanQueryField = (label: string) =>
+  z
+    .enum(["true", "false"], { error: `${label} must be true or false.` })
+    .transform((value) => value === "true");
