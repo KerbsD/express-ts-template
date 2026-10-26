@@ -32,6 +32,7 @@ import publicMerchRoute from "./src/routes/merch/public.ts";
 import adminMerchRoute from "./src/routes/merch/admin.ts";
 import publicDesignRoute from "./src/routes/design/public.ts";
 import adminDesignRoute from "./src/routes/design/admin.ts";
+import adminUploadsRoute from "./src/routes/uploads/admin.ts";
 
 const app = express();
 if (env.TRUST_PROXY_HOPS > 0) app.set("trust proxy", env.TRUST_PROXY_HOPS);
@@ -84,6 +85,7 @@ app.use("/admin/bookings", adminBookingsRoute);
 app.use("/admin/portfolio", adminPortfolioRoute);
 app.use("/admin/merch", adminMerchRoute);
 app.use("/admin/design", adminDesignRoute);
+app.use("/admin/uploads", adminUploadsRoute);
 
 app.all("*splat", notFound);
 app.use(errorHandler);
