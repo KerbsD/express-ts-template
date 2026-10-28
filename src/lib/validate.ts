@@ -20,3 +20,15 @@ export const validateBody =
     req.body = result.data; // cleaned data; unknown fields are stripped
     next();
   };
+
+// Express 5 makes req.query a read-only getter, so parsed/coerced values are
+// placed on res.locals.query for the controller to read (type it with z.infer).
+export const validateQuery =
+  <T>(schema: ZodType<T>) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) return sendValidationError(res, result.error);
+
+    res.locals.query = result.data;
+    next();
+  };

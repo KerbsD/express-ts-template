@@ -24,31 +24,31 @@ import loginRoute from "./src/routes/auth/login.ts";
 import passwordRoute from "./src/routes/auth/password.ts";
 import refreshTokenRoute from "./src/routes/auth/refresh.ts";
 import logoutRoute from "./src/routes/auth/logout.ts";
+import createBookingRoute from "./src/routes/bookings/create.ts";
+import adminBookingsRoute from "./src/routes/bookings/admin.ts";
+import publicPortfolioRoute from "./src/routes/portfolio/public.ts";
+import adminPortfolioRoute from "./src/routes/portfolio/admin.ts";
+import publicMerchRoute from "./src/routes/merch/public.ts";
+import adminMerchRoute from "./src/routes/merch/admin.ts";
+import publicDesignRoute from "./src/routes/design/public.ts";
+import adminDesignRoute from "./src/routes/design/admin.ts";
+import adminUploadsRoute from "./src/routes/uploads/admin.ts";
 
 const app = express();
-
-// Only trust X-Forwarded-For if you really are behind that many proxies
 if (env.TRUST_PROXY_HOPS > 0) app.set("trust proxy", env.TRUST_PROXY_HOPS);
 app.disable("x-powered-by");
 
 app.use(requestLogger);
 app.use(helmet());
-
-// This API returns tokens and private data on every route: keep all responses
-// uncacheable (helmet does not set Cache-Control). Mounted before CORS so even
-// preflight responses carry it.
 app.use(noStore);
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 
-// Public, and deliberately before the rate limiter so uptime checks never get blocked
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// Readiness: checks the database is reachable. Cached for a few seconds so
-// frequent probes can't hammer the pool; answers 503 while the DB is down.
 let dbReadiness = { ok: true, checkedAt: 0 };
 const READINESS_CACHE_MS = 5_000;
 
@@ -66,7 +66,6 @@ app.get("/health/ready", async (_req, res) => {
 
 app.use(globalLimiter);
 
-// Authentication (mounted under /auth so the refresh cookie can be scoped to path=/auth)
 app.use("/auth/login", loginRoute);
 app.use("/auth/register", registerRoute);
 app.use("/auth/verify-email", verifyEmailRoute);
@@ -75,11 +74,18 @@ app.use("/auth/password", passwordRoute);
 app.use("/auth/refresh", refreshTokenRoute);
 app.use("/auth/logout", logoutRoute);
 
-// Default-deny: everything registered BELOW this line requires a valid access
-// token, so a new route can't be left public by forgetting a middleware.
+app.use("/bookings", createBookingRoute);
+app.use("/portfolio", publicPortfolioRoute);
+app.use("/merch", publicMerchRoute);
+app.use("/design", publicDesignRoute);
+
 app.use(verifyJwt);
 
-// e.g. app.use("/notes", notesRoute);
+app.use("/admin/bookings", adminBookingsRoute);
+app.use("/admin/portfolio", adminPortfolioRoute);
+app.use("/admin/merch", adminMerchRoute);
+app.use("/admin/design", adminDesignRoute);
+app.use("/admin/uploads", adminUploadsRoute);
 
 app.all("*splat", notFound);
 app.use(errorHandler);
@@ -90,13 +96,10 @@ const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, "server listening");
 });
 
-// Slow-client protection. keepAlive > headers is the documented setup behind
-// load balancers (AWS ALB idles at 60s), otherwise you get sporadic 502s.
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 server.requestTimeout = 120_000;
 
-// Delete expired sessions and stale unverified accounts on startup, then hourly
 void runMaintenance();
 const maintenanceTimer = setInterval(
   () => void runMaintenance(),
@@ -113,7 +116,6 @@ const shutdown = (reason: string, exitCode = 0) => {
   shuttingDown = true;
   logger.info({ reason }, "shutting down");
 
-  // Hard stop if something hangs
   setTimeout(() => {
     logger.error("shutdown timed out, forcing exit");
     process.exit(1);
@@ -121,7 +123,6 @@ const shutdown = (reason: string, exitCode = 0) => {
 
   clearInterval(maintenanceTimer);
 
-  // Stop accepting new connections, let in-flight requests finish
   server.close(async () => {
     try {
       await closeRedis();

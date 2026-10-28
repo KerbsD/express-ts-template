@@ -46,7 +46,7 @@ const envSchema = z
         /^[A-Za-z0-9 .'-]+$/,
         "may only contain letters, numbers, spaces, . ' -",
       )
-      .default("MyApp"),
+      .default("Sorry Mom Tattoo"),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
       .default("info"),
@@ -73,6 +73,26 @@ const envSchema = z
       .refine(
         (v) => /^rediss?:\/\//.test(v),
         "must start with redis:// or rediss://",
+      )
+      .optional(),
+
+    // Supabase Storage for admin image uploads. Leave all three unset to
+    // disable uploads; the API then returns 503 instead of failing at startup.
+    SUPABASE_URL: z
+      .url("must be a valid URL")
+      .refine(
+        isPlainOrigin,
+        "must look like https://project-ref.supabase.co (scheme + host, no path or trailing slash)",
+      )
+      .optional(),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+    SUPABASE_STORAGE_BUCKET: z
+      .string()
+      .min(1)
+      .max(63)
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+        "must be a valid Supabase bucket name",
       )
       .optional(),
 
@@ -125,6 +145,21 @@ const envSchema = z
     {
       error: "must be https:// when NODE_ENV=production",
       path: ["CLIENT_URL"],
+    },
+  )
+  .refine(
+    (cfg) => {
+      const values = [
+        cfg.SUPABASE_URL,
+        cfg.SUPABASE_SERVICE_ROLE_KEY,
+        cfg.SUPABASE_STORAGE_BUCKET,
+      ];
+      return values.every(Boolean) || values.every((value) => value === undefined);
+    },
+    {
+      error:
+        "SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET must be set together",
+      path: ["SUPABASE_URL"],
     },
   )
   .refine(

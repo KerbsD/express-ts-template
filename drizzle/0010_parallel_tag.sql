@@ -1,0 +1,2 @@
+ALTER TABLE "bookings" ADD COLUMN "confirmation_email_sent_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "bookings" ADD COLUMN "cancellation_email_sent_at" timestamp with time zone;

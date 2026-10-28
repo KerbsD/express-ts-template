@@ -1,0 +1,1 @@
+ALTER TABLE "bookings" ALTER COLUMN "scheduled_at" SET DATA TYPE timestamp with time zone[] USING ARRAY["scheduled_at"];
