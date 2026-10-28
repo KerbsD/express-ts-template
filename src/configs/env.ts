@@ -46,7 +46,7 @@ const envSchema = z
         /^[A-Za-z0-9 .'-]+$/,
         "may only contain letters, numbers, spaces, . ' -",
       )
-      .default("MyApp"),
+      .default("Sorry Mom Tattoo"),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
       .default("info"),

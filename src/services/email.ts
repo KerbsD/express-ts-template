@@ -64,6 +64,111 @@ const resetUrl = (token: string) => `${BASE_URL}/reset-password#token=${token}`;
 const button = (href: string, label: string, color: string) =>
   `<a href="${href}" style="display:inline-block;padding:12px 24px;background:${color};color:#fff;border-radius:6px;text-decoration:none;font-weight:bold;">${label}</a>`;
 
+// Booking emails include values the visitor typed (name, note), so they must be
+// escaped before going into the HTML body.
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char] ?? char);
+
+// The API has no idea which timezone the visitor is in, so booking times are
+// always shown in UTC and labelled as such instead of the server's locale.
+const bookingDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+const formatBookingDate = (date: Date): string =>
+  `${bookingDateFormatter.format(date)} UTC`;
+
+export type BookingEmailDetails = {
+  id: number;
+  name: string;
+  email: string;
+  scheduledAt: Date[];
+  /** Optional message from the admin, shown to the customer. */
+  note?: string;
+};
+
+const bookingDatesHtml = (dates: Date[]): string => `
+  <ul style="margin:12px 0 0;padding-left:20px;color:#333;">
+    ${dates
+      .map((date) => `<li style="margin-bottom:4px;">${formatBookingDate(date)}</li>`)
+      .join("")}
+  </ul>
+`;
+
+const bookingDatesText = (dates: Date[]): string =>
+  dates.map((date) => `- ${formatBookingDate(date)}`).join("\n");
+
+const noteHtml = (note?: string): string =>
+  note
+    ? `<p style="margin-top:16px;padding:12px;background:#f5f5f5;border-radius:6px;white-space:pre-line;">${escapeHtml(note)}</p>`
+    : "";
+
+const noteText = (note?: string): string => (note ? `\n\n${note}\n` : "");
+
+export const sendBookingConfirmedEmail = async (
+  booking: BookingEmailDetails,
+): Promise<void> => {
+  const name = escapeHtml(booking.name);
+
+  await sendWithRetry({
+    from: FROM,
+    to: booking.email,
+    subject: `Your ${env.APP_NAME} booking is confirmed (#${booking.id})`,
+    text: `Hi ${booking.name},\n\nGood news — your ${env.APP_NAME} booking is confirmed.\n\nWhen:\n${bookingDatesText(booking.scheduledAt)}${noteText(booking.note)}\n\nIf you have any questions, just reply to this email.\n\n— ${env.APP_NAME}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto;">
+        <h2>Your booking is confirmed</h2>
+        <p>Hi ${name},</p>
+        <p>Good news — your ${env.APP_NAME} booking has been confirmed.</p>
+        <p style="margin-bottom:0;"><strong>When:</strong></p>
+        ${bookingDatesHtml(booking.scheduledAt)}
+        ${noteHtml(booking.note)}
+        <p style="margin-top:24px;">If you have any questions, just reply to this email.</p>
+        <p style="margin-top:24px;color:#999;font-size:13px;">Booking reference: #${booking.id}</p>
+      </div>
+    `,
+  });
+};
+
+export const sendBookingCancelledEmail = async (
+  booking: BookingEmailDetails,
+): Promise<void> => {
+  const name = escapeHtml(booking.name);
+
+  await sendWithRetry({
+    from: FROM,
+    to: booking.email,
+    subject: `Your ${env.APP_NAME} booking has been cancelled (#${booking.id})`,
+    text: `Hi ${booking.name},\n\nWe're sorry to let you know that your ${env.APP_NAME} booking has been cancelled.\n\nRequested date(s):\n${bookingDatesText(booking.scheduledAt)}${noteText(booking.note)}\n\nIf you have any questions or would like to book another date, just reply to this email.\n\n— ${env.APP_NAME}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto;">
+        <h2>Your booking has been cancelled</h2>
+        <p>Hi ${name},</p>
+        <p>We're sorry to let you know that your ${env.APP_NAME} booking has been cancelled.</p>
+        <p style="margin-bottom:0;"><strong>Requested date(s):</strong></p>
+        ${bookingDatesHtml(booking.scheduledAt)}
+        ${noteHtml(booking.note)}
+        <p style="margin-top:24px;">If you have any questions or would like to book another date, just reply to this email.</p>
+        <p style="margin-top:24px;color:#999;font-size:13px;">Booking reference: #${booking.id}</p>
+      </div>
+    `,
+  });
+};
+
 export const sendVerificationEmail = async (
   email: string,
   token: string,

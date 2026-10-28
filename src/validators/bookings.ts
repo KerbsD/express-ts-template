@@ -99,6 +99,12 @@ export const updateBookingSchema = z
     "Provide at least one field to update (status, scheduledAt, adminNote).",
   );
 
+// Manual customer email from the admin. `note` is optional and only used in
+// the email (the internal adminNote is never sent to the customer).
+export const sendBookingStatusEmailSchema = z.object({
+  note: z.string().trim().max(1000, "Note is too long.").optional(),
+});
+
 // Admin list query: ?status=confirmed&from=...&to=...&search=...&limit=...&offset=...&sort=createdAt&order=desc
 export const listBookingsQuerySchema = z.object({
   status: z.enum(BOOKING_STATUSES).optional(),
@@ -123,9 +129,15 @@ export const listBookingsQuerySchema = z.object({
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 export type UpdateBookingInput = z.infer<typeof updateBookingSchema>;
 export type ListBookingsQuery = z.infer<typeof listBookingsQuerySchema>;
+export type SendBookingStatusEmailInput = z.infer<
+  typeof sendBookingStatusEmailSchema
+>;
 
 // ---------- Ready-to-use middlewares ----------
 
 export const validateCreateBooking = validateBody(createBookingSchema);
 export const validateUpdateBooking = validateBody(updateBookingSchema);
 export const validateListBookingsQuery = validateQuery(listBookingsQuerySchema);
+export const validateSendBookingStatusEmail = validateBody(
+  sendBookingStatusEmailSchema,
+);

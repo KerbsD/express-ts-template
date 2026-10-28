@@ -112,6 +112,15 @@ export const bookings = pgTable(
     message: text("message").notNull().default(""),
     status: bookingStatus("status").notNull().default("pending"),
     adminNote: text("admin_note").notNull().default(""),
+    // Set when the admin manually sends the matching customer email. Two
+    // separate markers keep the history across status changes (e.g. a
+    // confirmation followed later by a cancellation).
+    confirmationEmailSentAt: timestamp("confirmation_email_sent_at", {
+      withTimezone: true,
+    }),
+    cancellationEmailSentAt: timestamp("cancellation_email_sent_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
