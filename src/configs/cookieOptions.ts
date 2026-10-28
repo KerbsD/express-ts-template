@@ -1,19 +1,40 @@
-import type { CookieOptions } from "express";
+import type { CookieOptions, Request, Response } from "express";
 import { env } from "./env.ts";
+
+// The refresh cookie holds an opaque session token (not a JWT). It was renamed
+// from "jwt": the legacy name is still read and cleared so existing sessions
+// survive the rename, and can be dropped once old cookies have expired.
+export const REFRESH_COOKIE_NAME = "refresh";
+export const LEGACY_REFRESH_COOKIE_NAME = "jwt";
 
 const COOKIE_OPTIONS: CookieOptions = {
   httpOnly: true,
   sameSite: env.COOKIE_SAMESITE,
   // Browsers reject SameSite=None without Secure
   secure: env.NODE_ENV === "production" || env.COOKIE_SAMESITE === "none",
-  // The refresh cookie is only sent to /auth/*, not to every endpoint.
-  // If you don't want to mount routes under /auth, change this to "/".
+  // The refresh cookie is only sent to /auth/* (both /auth/refresh and
+  // /auth/logout need it), not to every endpoint. If you don't want to mount
+  // routes under /auth, change this to "/".
   path: "/auth",
   maxAge: 24 * 60 * 60 * 1000, // 24 hours
 };
 
 // clearCookie must use the same attributes (path, sameSite, secure) but not maxAge
 const { maxAge: _maxAge, ...CLEAR_COOKIE_OPTIONS } = COOKIE_OPTIONS;
+
+/** Reads the refresh token, preferring the new cookie name. */
+export const getRefreshToken = (req: Request): string | undefined => {
+  const value =
+    req.cookies?.[REFRESH_COOKIE_NAME] ??
+    req.cookies?.[LEGACY_REFRESH_COOKIE_NAME];
+  return typeof value === "string" && value !== "" ? value : undefined;
+};
+
+/** Clears both cookie names (used on logout and on rejected refreshes). */
+export const clearRefreshCookies = (res: Response): void => {
+  res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+  res.clearCookie(LEGACY_REFRESH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+};
 
 export { CLEAR_COOKIE_OPTIONS };
 export default COOKIE_OPTIONS;

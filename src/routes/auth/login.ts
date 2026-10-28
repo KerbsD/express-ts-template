@@ -5,13 +5,16 @@ import {
   loginLimiter,
   loginUserBackoff,
 } from "../../lib/authLimiter.ts";
+import { requireTrustedOrigin } from "../../lib/requireTrustOrigin.ts";
 import { validateLogin } from "../../validators/auth.ts";
 
 const router = express.Router();
 
-// Limiters run BEFORE validation so junk requests are throttled too
+// Origin check first (like /auth/refresh and /auth/logout), then limiters
+// BEFORE validation so junk requests are throttled too
 router.post(
   "/",
+  requireTrustedOrigin,
   loginIpLimiter,
   loginLimiter,
   loginUserBackoff,

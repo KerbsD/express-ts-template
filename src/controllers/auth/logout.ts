@@ -1,20 +1,22 @@
 import type { Request, Response } from "express";
 
-import { CLEAR_COOKIE_OPTIONS } from "../../configs/cookieOptions.ts";
+import {
+  clearRefreshCookies,
+  getRefreshToken,
+} from "../../configs/cookieOptions.ts";
 import { revokeSessionFamily } from "../../lib/sessions.ts";
 import { isWellFormedToken } from "../../lib/tokens.ts";
 
 const handleLogout = async (req: Request, res: Response) => {
-  const refreshToken = req.cookies?.jwt;
+  const refreshToken = getRefreshToken(req);
 
-  // No cookie present, nothing to clear
-  if (typeof refreshToken !== "string" || !refreshToken)
-    return res.sendStatus(204);
+  // No cookie present: nothing to revoke, nothing to clear
+  if (!refreshToken) return res.sendStatus(204);
 
   // Revokes only this device's session family. Other devices stay logged in.
   if (isWellFormedToken(refreshToken)) await revokeSessionFamily(refreshToken);
 
-  res.clearCookie("jwt", CLEAR_COOKIE_OPTIONS);
+  clearRefreshCookies(res);
   res.sendStatus(204);
 };
 

@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
 import { env } from "../configs/env.ts";
-import { logger, serializeError } from "./logger.ts";
+import { securityLog, serializeError } from "./logger.ts";
+import { countEvent } from "./metrics.ts";
 
 /**
  * HaveIBeenPwned range API (k-anonymity): only the first 5 characters of the
- * SHA-1 hash leave this server, never the password. Fails OPEN: if the service
- * is down or slow, registration and resets must still work.
+ * SHA-1 hash leave this server, never the password.
+ *
+ * Fails OPEN on purpose: if the service is down or slow, registration and
+ * resets must still work. Each fail-open emits a security log + counter so a
+ * prolonged outage is alertable instead of silently weakening the check.
+ * (Production cannot disable the check: see PWNED_PASSWORD_CHECK in env.ts.)
  */
 export const isPwnedPassword = async (password: string): Promise<boolean> => {
   if (env.PWNED_PASSWORD_CHECK === "off") return false;
@@ -28,10 +33,12 @@ export const isPwnedPassword = async (password: string): Promise<boolean> => {
     }
     return false;
   } catch (err) {
-    logger.warn(
+    securityLog(
+      "pwned_check_unavailable",
       { err: serializeError(err) },
-      "pwned-password check unavailable, allowing password",
+      "warn",
     );
+    countEvent("pwned_check_unavailable");
     return false;
   }
 };

@@ -3,7 +3,11 @@ import { randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 
-import COOKIE_OPTIONS from "../../configs/cookieOptions.ts";
+import COOKIE_OPTIONS, {
+  CLEAR_COOKIE_OPTIONS,
+  LEGACY_REFRESH_COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+} from "../../configs/cookieOptions.ts";
 import { db } from "../../db/index.ts";
 import { users } from "../../db/schema.ts";
 import { securityLog } from "../../lib/logger.ts";
@@ -58,10 +62,13 @@ const handleLogin = async (req: Request, res: Response) => {
 
   securityLog("login_success", { userId: foundUser.id, ip: req.ip });
 
-  res.cookie("jwt", session.token, {
+  res.cookie(REFRESH_COOKIE_NAME, session.token, {
     ...COOKIE_OPTIONS,
     maxAge: session.maxAge,
   });
+  // Hygiene: clear a pre-rename cookie so only one credential is live
+  if (req.cookies?.[LEGACY_REFRESH_COOKIE_NAME] !== undefined)
+    res.clearCookie(LEGACY_REFRESH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
   res.json({ accessToken: signAccessToken(foundUser.id, foundUser.username) });
 };
 
