@@ -9,6 +9,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // their slots again. (Subset of BOOKING_STATUSES in validators/bookings.ts.)
 export const ACTIVE_STATUSES = ["pending", "confirmed"] as const;
 
+// The studio's local calendar day. Public availability is grouped by this zone
+// so a slot near midnight does not land on a different day for the visitor.
+export const STUDIO_TIME_ZONE = "Asia/Manila";
+
 const ACTIVE_STATUS_PARAMS = sql.join(
   ACTIVE_STATUSES.map((status) => sql`${status}::booking_status`),
   sql`, `,

@@ -25,6 +25,7 @@ import passwordRoute from "./src/routes/auth/password.ts";
 import refreshTokenRoute from "./src/routes/auth/refresh.ts";
 import logoutRoute from "./src/routes/auth/logout.ts";
 import createBookingRoute from "./src/routes/bookings/create.ts";
+import bookingAvailabilityRoute from "./src/routes/bookings/availability.ts";
 import adminBookingsRoute from "./src/routes/bookings/admin.ts";
 import publicPortfolioRoute from "./src/routes/portfolio/public.ts";
 import adminPortfolioRoute from "./src/routes/portfolio/admin.ts";
@@ -74,6 +75,7 @@ app.use("/auth/password", passwordRoute);
 app.use("/auth/refresh", refreshTokenRoute);
 app.use("/auth/logout", logoutRoute);
 
+app.use("/bookings/availability", bookingAvailabilityRoute);
 app.use("/bookings", createBookingRoute);
 app.use("/portfolio", publicPortfolioRoute);
 app.use("/merch", publicMerchRoute);
