@@ -68,9 +68,9 @@ app.get("/health/ready", async (_req, res) => {
 app.use(globalLimiter);
 
 app.use("/auth/login", loginRoute);
-app.use("/auth/register", registerRoute);
-app.use("/auth/verify-email", verifyEmailRoute);
-app.use("/auth/resend-verification", resendVerificationRoute);
+// app.use("/auth/register", registerRoute);
+// app.use("/auth/verify-email", verifyEmailRoute);
+// app.use("/auth/resend-verification", resendVerificationRoute);
 app.use("/auth/password", passwordRoute);
 app.use("/auth/refresh", refreshTokenRoute);
 app.use("/auth/logout", logoutRoute);
