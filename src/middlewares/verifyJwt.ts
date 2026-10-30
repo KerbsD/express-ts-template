@@ -6,7 +6,7 @@ import type { AccessTokenUser } from "../lib/tokens.ts";
 // RFC 7235 auth schemes are case-insensitive ("Bearer", "bearer", ...)
 const BEARER_PREFIX = "bearer ";
 
-export const verifyJwt = (req: Request, res: Response, next: NextFunction) => {
+export const verifyJwt = (req: any, res: Response, next: NextFunction) => {
   // Node lowercases header names, so only "authorization" exists
   const authHeader = req.headers.authorization ?? "";
 
